@@ -79,7 +79,6 @@ class TGForwarder:
             print(f"从 {chat_name} 转发资源到 {self.forward_to_channel} 失败: {e}")
 
     async def main(self):
-        await self.client.start()
         if not os.path.exists(self.download_folder):
             os.makedirs(self.download_folder)
         for chat_name in self.channels_to_monitor + self.groups_to_monitor:
@@ -89,6 +88,11 @@ class TGForwarder:
         await self.client.disconnect()
         if self.fdown:
             shutil.rmtree(self.download_folder)
+
+    def run(self):
+        with self.client.start():
+            self.client.loop.run_until_complete(self.main())
+
 
 if __name__ == '__main__':
     channels_to_monitor = []
@@ -106,6 +110,4 @@ if __name__ == '__main__':
     api_hash = 'xxx'
     string_session = 'xxx'
 
-    tg_forwarder = TGForwarder(api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor,
-                               forward_to_channel, limit, kw, ban, nokwforwards, fdown, download_folder)
-    asyncio.run(tg_forwarder.main())
+    TGForwarder(api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor,forward_to_channel, limit, kw, ban, nokwforwards, fdown, download_folder).run()
