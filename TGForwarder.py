@@ -2,15 +2,17 @@ from telethon import TelegramClient
 from telethon.tl.types import MessageMediaPhoto
 from telethon.sessions import StringSession
 import os
-import asyncio
+import socks
 import shutil
 import random
 import time
 
-
+if os.environ.get("HTTP_PROXY"):
+    http_proxy_list = os.environ["HTTP_PROXY"].split(":")
+    
 class TGForwarder:
     def __init__(self, api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor, forward_to_channel,
-                 limit, kw, ban, nokwforwards, fdown, download_folder):
+                 limit, kw, ban, nokwforwards, fdown, download_folder, proxy):
         self.api_id = api_id
         self.api_hash = api_hash
         self.string_session = string_session
@@ -23,7 +25,10 @@ class TGForwarder:
         self.nokwforwards = nokwforwards
         self.fdown = fdown
         self.download_folder = download_folder
-        self.client = TelegramClient(StringSession(string_session), api_id, api_hash)
+        if not proxy:
+            self.client = TelegramClient(StringSession(string_session), api_id, api_hash)
+        else:
+            self.client = TelegramClient(StringSession(string_session), api_id, api_hash,proxy=proxy)
 
     def random_wait(self, min_ms, max_ms):
         min_sec = min_ms / 1000
@@ -109,5 +114,17 @@ if __name__ == '__main__':
     api_id = xxx
     api_hash = 'xxx'
     string_session = 'xxx'
+    # 默认不开启代理
+    proxy = None
+    TGForwarder(api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor,forward_to_channel, limit, kw, ban, nokwforwards, fdown, download_folder, proxy).run()
 
-    TGForwarder(api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor,forward_to_channel, limit, kw, ban, nokwforwards, fdown, download_folder).run()
+
+'''
+代理参数说明:
+# SOCKS5
+proxy = (socks.SOCKS5,proxy_address,proxy_port,proxy_username,proxy_password)
+# HTTP
+proxy = (socks.HTTP,proxy_address,proxy_port,proxy_username,proxy_password))
+# HTTP_PROXY
+proxy=(socks.HTTP,http_proxy_list[1][2:],int(http_proxy_list[2]),proxy_username,proxy_password)
+'''
