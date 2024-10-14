@@ -9,9 +9,9 @@ tgsearch、tgsou需要配置一堆频道群组，完全可以跑个定时任务�
 暂时没有加入过滤去重功能，可能会重复转发
 
 ### 代理参数说明:
-- SOCKS5
+- SOCKS5  
 proxy = (socks.SOCKS5,proxy_address,proxy_port,proxy_username,proxy_password)
-- HTTP
+- HTTP  
 proxy = (socks.HTTP,proxy_address,proxy_port,proxy_username,proxy_password))
-- HTTP_PROXY
+- HTTP_PROXY  
 proxy=(socks.HTTP,http_proxy_list[1][2:],int(http_proxy_list[2]),proxy_username,proxy_password)
