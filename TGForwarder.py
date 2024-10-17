@@ -1,13 +1,13 @@
-from telethon import TelegramClient
-from telethon.tl.types import MessageMediaPhoto
-from telethon.sessions import StringSession
 import os
 import socks
 import shutil
 import re
 import random
 import time
-
+from telethon import TelegramClient
+from telethon.tl.types import MessageMediaPhoto
+from telethon.sessions import StringSession
+from telethon.tl.functions.channels import JoinChannelRequest
 '''
 代理参数说明:
 # SOCKS5
@@ -68,6 +68,8 @@ class TGForwarder:
     async def forward_messages(self, chat_name, target_chat_name):
         global total
         try:
+            if try_join:
+                await self.client(JoinChannelRequest(chat_name))
             chat = await self.client.get_entity(chat_name)
             messages = self.client.iter_messages(chat, limit=self.limit)
             async for message in messages:
@@ -75,7 +77,9 @@ class TGForwarder:
                 forwards = message.forwards
                 if message.media:
                     # 视频
-                    if hasattr(message.document, 'mime_type') and self.contains(message.document.mime_type,'video') and self.nocontains(message.message, self.ban):
+                    if hasattr(message.document, 'mime_type') and self.contains(message.document.mime_type,
+                                                                                'video') and self.nocontains(
+                            message.message, self.ban):
                         if forwards:
                             size = message.document.size
                             if size not in self.checkbox['sizes']:
@@ -84,7 +88,8 @@ class TGForwarder:
                             else:
                                 print(f'视频已经存在，size: {size}')
                     # 图文(匹配关键词)
-                    elif self.contains(message.message, self.kw) and message.message and self.nocontains(message.message, self.ban):
+                    elif self.contains(message.message, self.kw) and message.message and self.nocontains(
+                            message.message, self.ban):
                         matches = re.findall(self.pattern, message.message)
                         if matches:
                             link = matches[0]
@@ -129,9 +134,8 @@ class TGForwarder:
             # if message.fwd_from:
             #     post_ids.append(f'{message.fwd_from.from_id.channel_id}_{message.fwd_from.channel_post}')
         # self.checkbox['posts_ids']=list(set(post_ids))
-        self.checkbox['links']=list(set(links))
-        self.checkbox['sizes']=list(set(sizes))
-        
+        self.checkbox['links'] = list(set(links))
+        self.checkbox['sizes'] = list(set(sizes))
     async def main(self):
         await self.check()
         if not os.path.exists(self.download_folder):
@@ -156,14 +160,16 @@ if __name__ == '__main__':
     limit = 5
     kw = ['链接', '片名', '名称']
     ban = ['预告', '预感', 'https://t.me/', '盈利', '即可观看']
+    # 尝试加入公共群组频道，无法过验证
+    try_join = False
     # 禁止转发非关键词图文
     nokwforwards = False
     # 当频道禁止转发时，是否下载图片发送消息
     fdown = True
     download_folder = 'downloads'
     api_id = xxx
-    api_hash = 'xxxx'
-    string_session = 'xxxx'
+    api_hash = 'xxx'
+    string_session = 'xxx'
     # 默认不开启代理
     proxy = None
     # 检测自己频道最近100条消息是否已经包含该资源
