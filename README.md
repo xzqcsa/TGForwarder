@@ -11,26 +11,7 @@ tgsearch、tgsou需要配置一堆频道群组，完全可以跑个定时任务�
 - 有些资源有跳转链接，暂时不支持，这种由他去吧，我也不想搞
 - 有些资源在评论里，暂时无法处理  
 思路：使用client.get_replies  
-```
-from telethon import TelegramClient
 
-api_id = '你的api_id'
-api_hash = '你的api_hash'
-client = TelegramClient('session_name', api_id, api_hash)
-
-async def main():
-    await client.start()
-    chat_id = '频道或聊天的ID'  # 替换为你要获取消息的频道或聊天的ID
-    message_id = '消息的ID'  # 替换为你要获取评论的消息的ID
-
-    # 获取消息的所有回复
-    replies = await client.get_replies(client.get_entity(chat_id), message_id)
-    for reply in replies:
-        print(f"{reply.id}: {reply.text}")
-
-with client:
-    client.loop.run_until_complete(main())
-```
 
 ### 代理参数说明:
 - SOCKS5  
