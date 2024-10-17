@@ -4,15 +4,31 @@ from telethon.sessions import StringSession
 import os
 import socks
 import shutil
+import re
 import random
 import time
 
+'''
+代理参数说明:
+# SOCKS5
+proxy = (socks.SOCKS5,proxy_address,proxy_port,proxy_username,proxy_password)
+# HTTP
+proxy = (socks.HTTP,proxy_address,proxy_port,proxy_username,proxy_password))
+# HTTP_PROXY
+proxy=(socks.HTTP,http_proxy_list[1][2:],int(http_proxy_list[2]),proxy_username,proxy_password)
+'''
+
 if os.environ.get("HTTP_PROXY"):
     http_proxy_list = os.environ["HTTP_PROXY"].split(":")
-    
+
+
 class TGForwarder:
     def __init__(self, api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor, forward_to_channel,
-                 limit, kw, ban, nokwforwards, fdown, download_folder, proxy):
+                 limit, kw, ban, nokwforwards, fdown, download_folder, proxy, checknum):
+        self.checkbox = {}
+        self.checknum = checknum
+        # 正则表达式匹配资源链接
+        self.pattern = r"(?:链接：|magnet:)?\s*(https?://[^\s]+|magnet:.+)"
         self.api_id = api_id
         self.api_hash = api_hash
         self.string_session = string_session
@@ -28,7 +44,7 @@ class TGForwarder:
         if not proxy:
             self.client = TelegramClient(StringSession(string_session), api_id, api_hash)
         else:
-            self.client = TelegramClient(StringSession(string_session), api_id, api_hash,proxy=proxy)
+            self.client = TelegramClient(StringSession(string_session), api_id, api_hash, proxy=proxy)
 
     def random_wait(self, min_ms, max_ms):
         min_sec = min_ms / 1000
@@ -58,20 +74,30 @@ class TGForwarder:
                 self.random_wait(200, 1000)
                 forwards = message.forwards
                 if message.media:
-                    if hasattr(message.document, 'mime_type') and self.contains(message.document.mime_type,
-                                                                                'video') and self.nocontains(
-                            message.message, self.ban):
+                    # 视频
+                    if hasattr(message.document, 'mime_type') and self.contains(message.document.mime_type,'video') and self.nocontains(message.message, self.ban):
                         if forwards:
-                            await self.client.forward_messages(target_chat_name, message)
-                            total += 1
-                    elif self.contains(message.message, self.kw) and message.message and self.nocontains(
-                            message.message, self.ban):
-                        if forwards:
-                            await self.client.forward_messages(target_chat_name, message)
-                            total += 1
-                        else:
-                            await self.send(message, target_chat_name)
-                            total += 1
+                            size = message.document.size
+                            if size not in self.checkbox['sizes']:
+                                await self.client.forward_messages(target_chat_name, message)
+                                total += 1
+                            else:
+                                print(f'视频已经存在，size: {size}')
+                    # 图文(匹配关键词)
+                    elif self.contains(message.message, self.kw) and message.message and self.nocontains(message.message, self.ban):
+                        matches = re.findall(self.pattern, message.message)
+                        if matches:
+                            link = matches[0]
+                            if link not in self.checkbox['links']:
+                                if forwards:
+                                    await self.client.forward_messages(target_chat_name, message)
+                                    total += 1
+                                else:
+                                    await self.send(message, target_chat_name)
+                                    total += 1
+                            else:
+                                print(f'链接已存在，link: {link}')
+                    # 图文(不含关键词，默认nokwforwards=False)
                     elif self.nokwforwards and message.message and self.nocontains(message.message, self.ban):
                         if forwards:
                             await self.client.forward_messages(target_chat_name, message)
@@ -83,7 +109,31 @@ class TGForwarder:
         except Exception as e:
             print(f"从 {chat_name} 转发资源到 {self.forward_to_channel} 失败: {e}")
 
+    async def check(self):
+        # post_ids = []
+        links = []
+        sizes = []
+        chat = await self.client.get_entity(self.forward_to_channel)
+        messages = self.client.iter_messages(chat, limit=self.checknum)
+        async for message in messages:
+            # print(f'{self.forward_to_channel}: {message.id}')
+            # 视频类型对比大小
+            if hasattr(message.document, 'mime_type'):
+                sizes.append(message.document.size)
+            # 匹配出链接
+            if message.message:
+                matches = re.findall(self.pattern, message.message)
+                for match in matches:
+                    links.append(match)
+            # 消息类型为转发-不再从相同频道再次转发，links可以覆盖该场景
+            # if message.fwd_from:
+            #     post_ids.append(f'{message.fwd_from.from_id.channel_id}_{message.fwd_from.channel_post}')
+        # self.checkbox['posts_ids']=list(set(post_ids))
+        self.checkbox['links']=list(set(links))
+        self.checkbox['sizes']=list(set(sizes))
+        
     async def main(self):
+        await self.check()
         if not os.path.exists(self.download_folder):
             os.makedirs(self.download_folder)
         for chat_name in self.channels_to_monitor + self.groups_to_monitor:
@@ -102,8 +152,8 @@ class TGForwarder:
 if __name__ == '__main__':
     channels_to_monitor = []
     groups_to_monitor = []
-    forward_to_channel = 'xxxx'
-    limit = 2
+    forward_to_channel = 'xxx'
+    limit = 5
     kw = ['链接', '片名', '名称']
     ban = ['预告', '预感', 'https://t.me/', '盈利', '即可观看']
     # 禁止转发非关键词图文
@@ -112,19 +162,11 @@ if __name__ == '__main__':
     fdown = True
     download_folder = 'downloads'
     api_id = xxx
-    api_hash = 'xxx'
-    string_session = 'xxx'
+    api_hash = 'xxxx'
+    string_session = 'xxxx'
     # 默认不开启代理
     proxy = None
-    TGForwarder(api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor,forward_to_channel, limit, kw, ban, nokwforwards, fdown, download_folder, proxy).run()
-
-
-'''
-代理参数说明:
-# SOCKS5
-proxy = (socks.SOCKS5,proxy_address,proxy_port,proxy_username,proxy_password)
-# HTTP
-proxy = (socks.HTTP,proxy_address,proxy_port,proxy_username,proxy_password))
-# HTTP_PROXY
-proxy=(socks.HTTP,http_proxy_list[1][2:],int(http_proxy_list[2]),proxy_username,proxy_password)
-'''
+    # 检测自己频道最近100条消息是否已经包含该资源
+    checknum = 100
+    TGForwarder(api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor, forward_to_channel, limit, kw,
+                ban, nokwforwards, fdown, download_folder, proxy, checknum).run()
