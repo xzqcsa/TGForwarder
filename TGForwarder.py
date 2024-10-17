@@ -4,7 +4,7 @@ import shutil
 import re
 import random
 import time
-from telethon import TelegramClient
+from telethon import TelegramClient,functions
 from telethon.tl.types import MessageMediaPhoto
 from telethon.sessions import StringSession
 from telethon.tl.functions.channels import JoinChannelRequest
@@ -24,7 +24,7 @@ if os.environ.get("HTTP_PROXY"):
 
 class TGForwarder:
     def __init__(self, api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor, forward_to_channel,
-                 limit, kw, ban, nokwforwards, fdown, download_folder, proxy, checknum):
+                 limit, replies_limit, kw, ban, nokwforwards, fdown, download_folder, proxy, checknum):
         self.checkbox = {}
         self.checknum = checknum
         # 正则表达式匹配资源链接
@@ -36,6 +36,7 @@ class TGForwarder:
         self.groups_to_monitor = groups_to_monitor
         self.forward_to_channel = forward_to_channel
         self.limit = limit
+        self.replies_limit = replies_limit
         self.kw = kw
         self.ban = ban
         self.nokwforwards = nokwforwards
@@ -65,6 +66,45 @@ class TGForwarder:
         else:
             await self.client.send_message(target_chat_name, message.message)
 
+    async def get_peer(self,client, channel_name):
+        peer = None
+        try:
+            peer = await client.get_input_entity(channel_name)
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+        finally:
+            return peer
+
+    async def get_all_replies(self,chat_name, message):
+        '''
+        获取频道消息下的评论，有些视频/资源链接被放在评论中
+        '''
+        offset_id = 0
+        all_replies = []
+        peer = await self.get_peer(self.client, chat_name)
+        if peer is None:
+            return []
+        while True:
+            try:
+                replies = await self.client(functions.messages.GetRepliesRequest(
+                    peer=peer,
+                    msg_id=message.id,
+                    offset_id=offset_id,
+                    offset_date=None,
+                    add_offset=0,
+                    limit=100,
+                    max_id=0,
+                    min_id=0,
+                    hash=0
+                ))
+                all_replies.extend(replies.messages)
+                if len(replies.messages) < 100:
+                    break
+                offset_id = replies.messages[-1].id
+            except Exception as e:
+                print(f"Unexpected error while fetching replies: {e.__class__.__name__} {e}")
+                break
+        return all_replies
     async def forward_messages(self, chat_name, target_chat_name):
         global total
         try:
@@ -77,9 +117,7 @@ class TGForwarder:
                 forwards = message.forwards
                 if message.media:
                     # 视频
-                    if hasattr(message.document, 'mime_type') and self.contains(message.document.mime_type,
-                                                                                'video') and self.nocontains(
-                            message.message, self.ban):
+                    if hasattr(message.document, 'mime_type') and self.contains(message.document.mime_type,'video') and self.nocontains(message.message, self.ban):
                         if forwards:
                             size = message.document.size
                             if size not in self.checkbox['sizes']:
@@ -88,8 +126,7 @@ class TGForwarder:
                             else:
                                 print(f'视频已经存在，size: {size}')
                     # 图文(匹配关键词)
-                    elif self.contains(message.message, self.kw) and message.message and self.nocontains(
-                            message.message, self.ban):
+                    elif self.contains(message.message, self.kw) and message.message and self.nocontains(message.message, self.ban):
                         matches = re.findall(self.pattern, message.message)
                         if matches:
                             link = matches[0]
@@ -102,14 +139,34 @@ class TGForwarder:
                                     total += 1
                             else:
                                 print(f'链接已存在，link: {link}')
-                    # 图文(不含关键词，默认nokwforwards=False)
+                    # 图文(不含关键词，默认nokwforwards=False)，资源被放到评论中
                     elif self.nokwforwards and message.message and self.nocontains(message.message, self.ban):
-                        if forwards:
-                            await self.client.forward_messages(target_chat_name, message)
-                            total += 1
-                        else:
-                            await self.send(message, target_chat_name)
-                            total += 1
+                        replies = await self.get_all_replies(chat_name,message)
+                        replies = replies[-self.replies_limit:]
+                        for r in replies:
+                            # 评论中的视频
+                            if hasattr(r.document, 'mime_type') and self.contains(r.document.mime_type,'video') and self.nocontains(r.message, self.ban):
+                                size = r.document.size
+                                if size not in self.checkbox['sizes']:
+                                    await self.client.forward_messages(target_chat_name, r)
+                                    total += 1
+                                else:
+                                    print(f'视频已经存在，size: {size}')
+                            # 评论中链接关键词
+                            elif self.contains(r.message, self.kw) and r.message and self.nocontains(r.message, self.ban):
+                                matches = re.findall(self.pattern, r.message)
+                                if matches:
+                                    link = matches[0]
+                                    if link not in self.checkbox['links']:
+                                        if forwards:
+                                            await self.client.forward_messages(target_chat_name, r)
+                                            total += 1
+                                        else:
+                                            await self.send(r, target_chat_name)
+                                            total += 1
+                                    else:
+                                        print(f'链接已存在，link: {link}')
+
             print(f"从 {chat_name} 转发资源到 {self.forward_to_channel} total: {total}")
         except Exception as e:
             print(f"从 {chat_name} 转发资源到 {self.forward_to_channel} 失败: {e}")
@@ -157,22 +214,25 @@ if __name__ == '__main__':
     channels_to_monitor = []
     groups_to_monitor = []
     forward_to_channel = 'xxx'
+    # 监控最近消息数
     limit = 5
+    # 监控消息中评论数，有些视频、资源链接被放到评论中
+    replies_limit = 1
     kw = ['链接', '片名', '名称']
     ban = ['预告', '预感', 'https://t.me/', '盈利', '即可观看']
     # 尝试加入公共群组频道，无法过验证
     try_join = False
-    # 禁止转发非关键词图文
-    nokwforwards = False
+    # 消息中不含关键词图文，但有些资源被放到消息评论中，如果需要监控评论中资源，需要开启，否则建议关闭
+    nokwforwards = True
     # 当频道禁止转发时，是否下载图片发送消息
     fdown = True
     download_folder = 'downloads'
     api_id = xxx
     api_hash = 'xxx'
-    string_session = 'xxx'
+    string_session = 'xxxx'
     # 默认不开启代理
     proxy = None
     # 检测自己频道最近100条消息是否已经包含该资源
     checknum = 100
-    TGForwarder(api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor, forward_to_channel, limit, kw,
+    TGForwarder(api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor, forward_to_channel, limit, replies_limit, kw,
                 ban, nokwforwards, fdown, download_folder, proxy, checknum).run()
