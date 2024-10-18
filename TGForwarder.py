@@ -139,7 +139,7 @@ class TGForwarder:
                         if matches:
                             link = matches[0]
                             if link not in self.checkbox['links']:
-                                link_ok = True
+                                link_ok = True if not self.linkvalidtor else False
                                 if self.linkvalidtor:
                                     result = await self.netdisklinkvalidator(matches)
                                     for r in result:
@@ -175,7 +175,7 @@ class TGForwarder:
                                 if matches:
                                     link = matches[0]
                                     if link not in self.checkbox['links']:
-                                        link_ok = True
+                                        link_ok = True if not self.linkvalidtor else False
                                         if self.linkvalidtor:
                                             result = await self.netdisklinkvalidator(matches)
                                             for r in result:
