@@ -127,7 +127,7 @@ class TGForwarder:
                     if hasattr(message.document, 'mime_type') and self.contains(message.document.mime_type,'video') and self.nocontains(message.message, self.ban):
                         if forwards:
                             size = message.document.size
-                            if size not in self.checkbox['sizes']:
+                            if size not in sizes:
                                 await self.client.forward_messages(target_chat_name, message)
                                 sizes.append(size)
                                 total += 1
@@ -138,7 +138,7 @@ class TGForwarder:
                         matches = re.findall(self.pattern, message.message)
                         if matches:
                             link = matches[0]
-                            if link not in self.checkbox['links']:
+                            if link not in links:
                                 link_ok = True if not self.linkvalidtor else False
                                 if self.linkvalidtor:
                                     result = await self.netdisklinkvalidator(matches)
@@ -163,7 +163,7 @@ class TGForwarder:
                             # 评论中的视频
                             if hasattr(r.document, 'mime_type') and self.contains(r.document.mime_type,'video') and self.nocontains(r.message, self.ban):
                                 size = r.document.size
-                                if size not in self.checkbox['sizes']:
+                                if size not in sizes:
                                     await self.client.forward_messages(target_chat_name, r)
                                     total += 1
                                     sizes.append(size)
@@ -174,7 +174,7 @@ class TGForwarder:
                                 matches = re.findall(self.pattern, r.message)
                                 if matches:
                                     link = matches[0]
-                                    if link not in self.checkbox['links']:
+                                    if link not in links:
                                         link_ok = True if not self.linkvalidtor else False
                                         if self.linkvalidtor:
                                             result = await self.netdisklinkvalidator(matches)
