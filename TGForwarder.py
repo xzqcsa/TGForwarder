@@ -275,6 +275,8 @@ class TGForwarder:
             pattern = r"https?://[^\s]+/s/([a-zA-Z0-9]+)"
         elif "115.com" in url:
             pattern = r"https?://[^\s]+/s/([a-zA-Z0-9]+)"
+        elif url.startswith("magnet:"):
+            return "magnet"  # 磁力链接特殊值
         else:
             return None
         match = re.search(pattern, url)
@@ -295,6 +297,8 @@ class TGForwarder:
         elif "115.com" in url:
             result = await self.check_115(share_id)
             return url, result
+        elif share_id == "magnet":
+            return url, True  # 磁力链接直接返回True
     async def netdisklinkvalidator(self,urls):
         tasks = [self.check_url(url) for url in urls]
         results = await asyncio.gather(*tasks)
