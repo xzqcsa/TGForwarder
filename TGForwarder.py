@@ -24,7 +24,7 @@ if os.environ.get("HTTP_PROXY"):
 
 class TGForwarder:
     def __init__(self, api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor, forward_to_channel,
-                 limit, replies_limit, kw, ban, nokwforwards, fdown, download_folder, proxy, checknum):
+                 limit, replies_limit, kw, ban, only_send, nokwforwards, fdown, download_folder, proxy, checknum):
         self.checkbox = {}
         self.checknum = checknum
         # 正则表达式匹配资源链接
@@ -39,6 +39,7 @@ class TGForwarder:
         self.replies_limit = replies_limit
         self.kw = kw
         self.ban = ban
+        self.only_send = only_send
         self.nokwforwards = nokwforwards
         self.fdown = fdown
         self.download_folder = download_folder
@@ -107,6 +108,8 @@ class TGForwarder:
         return all_replies
     async def forward_messages(self, chat_name, target_chat_name):
         global total
+        links = self.checkbox['links']
+        sizes = self.checkbox['sizes']
         try:
             if try_join:
                 await self.client(JoinChannelRequest(chat_name))
@@ -122,6 +125,7 @@ class TGForwarder:
                             size = message.document.size
                             if size not in self.checkbox['sizes']:
                                 await self.client.forward_messages(target_chat_name, message)
+                                sizes.append(size)
                                 total += 1
                             else:
                                 print(f'视频已经存在，size: {size}')
@@ -131,12 +135,14 @@ class TGForwarder:
                         if matches:
                             link = matches[0]
                             if link not in self.checkbox['links']:
-                                if forwards:
+                                if forwards and not self.only_send:
                                     await self.client.forward_messages(target_chat_name, message)
                                     total += 1
+                                    links.append(link)
                                 else:
                                     await self.send(message, target_chat_name)
                                     total += 1
+                                    links.append(link)
                             else:
                                 print(f'链接已存在，link: {link}')
                     # 图文(不含关键词，默认nokwforwards=False)，资源被放到评论中
@@ -150,6 +156,7 @@ class TGForwarder:
                                 if size not in self.checkbox['sizes']:
                                     await self.client.forward_messages(target_chat_name, r)
                                     total += 1
+                                    sizes.append(size)
                                 else:
                                     print(f'视频已经存在，size: {size}')
                             # 评论中链接关键词
@@ -158,15 +165,19 @@ class TGForwarder:
                                 if matches:
                                     link = matches[0]
                                     if link not in self.checkbox['links']:
-                                        if forwards:
+                                        if forwards and not self.only_send:
                                             await self.client.forward_messages(target_chat_name, r)
                                             total += 1
+                                            links.append(link)
                                         else:
                                             await self.send(r, target_chat_name)
                                             total += 1
+                                            links.append(link)
                                     else:
                                         print(f'链接已存在，link: {link}')
 
+            self.checkbox['links'] = links
+            self.checkbox['sizes'] = sizes
             print(f"从 {chat_name} 转发资源到 {self.forward_to_channel} total: {total}")
         except Exception as e:
             print(f"从 {chat_name} 转发资源到 {self.forward_to_channel} 失败: {e}")
@@ -210,6 +221,7 @@ class TGForwarder:
             self.client.loop.run_until_complete(self.main())
 
 
+
 if __name__ == '__main__':
     channels_to_monitor = []
     groups_to_monitor = []
@@ -224,6 +236,8 @@ if __name__ == '__main__':
     try_join = False
     # 消息中不含关键词图文，但有些资源被放到消息评论中，如果需要监控评论中资源，需要开启，否则建议关闭
     nokwforwards = True
+    # 图文资源只主动发送，不转发，可以降低限制风险；不支持视频场景
+    only_send = True
     # 当频道禁止转发时，是否下载图片发送消息
     fdown = True
     download_folder = 'downloads'
@@ -235,4 +249,4 @@ if __name__ == '__main__':
     # 检测自己频道最近100条消息是否已经包含该资源
     checknum = 100
     TGForwarder(api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor, forward_to_channel, limit, replies_limit, kw,
-                ban, nokwforwards, fdown, download_folder, proxy, checknum).run()
+                ban, only_send, nokwforwards, fdown, download_folder, proxy, checknum).run()
