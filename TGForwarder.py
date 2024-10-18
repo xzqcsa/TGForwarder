@@ -1,9 +1,12 @@
 import os
 import socks
 import shutil
-import re
 import random
 import time
+import httpx
+import json
+import re
+import asyncio
 from telethon import TelegramClient,functions
 from telethon.tl.types import MessageMediaPhoto
 from telethon.sessions import StringSession
@@ -24,7 +27,7 @@ if os.environ.get("HTTP_PROXY"):
 
 class TGForwarder:
     def __init__(self, api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor, forward_to_channel,
-                 limit, replies_limit, kw, ban, only_send, nokwforwards, fdown, download_folder, proxy, checknum):
+                 limit, replies_limit, kw, ban, only_send, nokwforwards, fdown, download_folder, proxy, checknum, linkvalidtor):
         self.checkbox = {}
         self.checknum = checknum
         # 正则表达式匹配资源链接
@@ -39,6 +42,7 @@ class TGForwarder:
         self.replies_limit = replies_limit
         self.kw = kw
         self.ban = ban
+        self.linkvalidtor = linkvalidtor
         self.only_send = only_send
         self.nokwforwards = nokwforwards
         self.fdown = fdown
@@ -135,11 +139,17 @@ class TGForwarder:
                         if matches:
                             link = matches[0]
                             if link not in self.checkbox['links']:
-                                if forwards and not self.only_send:
+                                link_ok = True
+                                if self.linkvalidtor:
+                                    result = await self.netdisklinkvalidator(matches)
+                                    for r in result:
+                                        if r[1]:
+                                            link_ok = True
+                                if forwards and not self.only_send and link_ok:
                                     await self.client.forward_messages(target_chat_name, message)
                                     total += 1
                                     links.append(link)
-                                else:
+                                elif link_ok:
                                     await self.send(message, target_chat_name)
                                     total += 1
                                     links.append(link)
@@ -165,11 +175,17 @@ class TGForwarder:
                                 if matches:
                                     link = matches[0]
                                     if link not in self.checkbox['links']:
-                                        if forwards and not self.only_send:
+                                        link_ok = True
+                                        if self.linkvalidtor:
+                                            result = await self.netdisklinkvalidator(matches)
+                                            for r in result:
+                                                if r[1]:
+                                                    link_ok = r[1]
+                                        if forwards and not self.only_send and link_ok:
                                             await self.client.forward_messages(target_chat_name, r)
                                             total += 1
                                             links.append(link)
-                                        else:
+                                        elif link_ok:
                                             await self.send(r, target_chat_name)
                                             total += 1
                                             links.append(link)
@@ -181,8 +197,10 @@ class TGForwarder:
             print(f"从 {chat_name} 转发资源到 {self.forward_to_channel} total: {total}")
         except Exception as e:
             print(f"从 {chat_name} 转发资源到 {self.forward_to_channel} 失败: {e}")
-
-    async def check(self):
+    async def checkhistory(self):
+        '''
+        检索历史消息用于过滤去重
+        '''
         # post_ids = []
         links = []
         sizes = []
@@ -204,8 +222,87 @@ class TGForwarder:
         # self.checkbox['posts_ids']=list(set(post_ids))
         self.checkbox['links'] = list(set(links))
         self.checkbox['sizes'] = list(set(sizes))
+    async def check_aliyun(self,share_id):
+        api_url = "https://api.aliyundrive.com/adrive/v3/share_link/get_share_by_anonymous"
+        headers = {"Content-Type": "application/json"}
+        data = json.dumps({"share_id": share_id})
+        async with httpx.AsyncClient() as client:
+            response = await client.post(api_url, headers=headers, data=data)
+            response_json = response.json()
+            if response_json.get('has_pwd'):
+                return True
+            if response_json.get('code') == 'NotFound.ShareLink':
+                return False
+            if not response_json.get('file_infos'):
+                return False
+            return True
+    async def check_115(self,share_id):
+        api_url = "https://webapi.115.com/share/snap"
+        params = {"share_code": share_id, "receive_code": ""}
+        async with httpx.AsyncClient() as client:
+            response = await client.get(api_url, params=params)
+            response_json = response.json()
+            if response_json.get('state'):
+                return True
+            elif '请输入访问码' in response_json.get('error', ''):
+                return True
+            return False
+    async def check_quark(self,share_id):
+        api_url = "https://drive.quark.cn/1/clouddrive/share/sharepage/token"
+        headers = {"Content-Type": "application/json"}
+        data = json.dumps({"pwd_id": share_id, "passcode": ""})
+        async with httpx.AsyncClient() as client:
+            response = await client.post(api_url, headers=headers, data=data)
+            response_json = response.json()
+            if response_json.get('message') == "ok":
+                token = response_json.get('data', {}).get('stoken')
+                if not token:
+                    return False
+                detail_url = f"https://drive-h.quark.cn/1/clouddrive/share/sharepage/detail?pwd_id={share_id}&stoken={token}&_fetch_share=1"
+                detail_response = await client.get(detail_url)
+                detail_response_json = detail_response.json()
+                if detail_response_json.get('data', {}).get('share', {}).get('status') == 1:
+                    return True
+                else:
+                    return False
+            elif response_json.get('message') == "需要提取码":
+                return True
+            return False
+    def extract_share_id(self,url):
+        if "aliyundrive.com" in url or "alipan.com" in url:
+            pattern = r"https?://[^\s]+/s/([a-zA-Z0-9]+)"
+        elif "pan.quark.cn" in url:
+            pattern = r"https?://[^\s]+/s/([a-zA-Z0-9]+)"
+        elif "115.com" in url:
+            pattern = r"https?://[^\s]+/s/([a-zA-Z0-9]+)"
+        else:
+            return None
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+        return None
+    async def check_url(self,url):
+        share_id = self.extract_share_id(url)
+        if not share_id:
+            print(f"无法识别的链接或网盘服务: {url}")
+            return url, False
+        if "aliyundrive.com" in url or "alipan.com" in url:
+            result = await self.check_aliyun(share_id)
+            return url, result
+        elif "pan.quark.cn" in url:
+            result = await self.check_quark(share_id)
+            return url, result
+        elif "115.com" in url:
+            result = await self.check_115(share_id)
+            return url, result
+    async def netdisklinkvalidator(self,urls):
+        tasks = [self.check_url(url) for url in urls]
+        results = await asyncio.gather(*tasks)
+        for url, result in results:
+            print(f"{url} - {'有效' if result else '无效'}")
+        return results
     async def main(self):
-        await self.check()
+        await self.checkhistory()
         if not os.path.exists(self.download_folder):
             os.makedirs(self.download_folder)
         for chat_name in self.channels_to_monitor + self.groups_to_monitor:
@@ -219,7 +316,6 @@ class TGForwarder:
     def run(self):
         with self.client.start():
             self.client.loop.run_until_complete(self.main())
-
 
 
 if __name__ == '__main__':
@@ -248,5 +344,7 @@ if __name__ == '__main__':
     proxy = None
     # 检测自己频道最近100条消息是否已经包含该资源
     checknum = 100
+    # 对网盘链接有效性检测
+    linkvalidtor = False
     TGForwarder(api_id, api_hash, string_session, channels_to_monitor, groups_to_monitor, forward_to_channel, limit, replies_limit, kw,
-                ban, only_send, nokwforwards, fdown, download_folder, proxy, checknum).run()
+                ban, only_send, nokwforwards, fdown, download_folder, proxy, checknum, linkvalidtor).run()
